@@ -1,14 +1,15 @@
 from sys import argv
-from os import stat
+from os import stat, path, mkdir
 import string
 from time import time
 from shutil import copyfile
 from collections import defaultdict
 
 from randomtools.tablereader import (
-    determine_global_table, sort_good_order, set_table_specs,
+    determine_global_table, sort_good_order, set_table_specs, set_table_extras,
     set_global_output_filename, select_patches, write_patches, verify_patches,
-    get_random_degree, set_random_degree, set_seed, get_seed, close_file)
+    get_random_degree, set_random_degree, set_seed, get_seed, close_file,
+    set_definitions, get_global_label)
 from randomtools.utils import (
     utilrandom as random, rewrite_snes_title, rewrite_snes_checksum,
     md5hash)
@@ -130,8 +131,19 @@ def run_interface(objects, custom_degree=False, snes=False, codes=None):
     set_seed(seed)
     random.seed(seed)
 
-    flagobjects = [o for o in objects if hasattr(o, "flag")
-                   and hasattr(o, "flag_description")]
+    # TODO: Temporary ugly hack until all flag in rotds can be randomized
+    uglyhack = input("RotDS ROM? (y/n) ").strip().lower()
+    if uglyhack == "y":
+        flagobjects = [o for o in objects if hasattr(o, "flag")
+                   and hasattr(o, "flag_description")
+                   and (o.flag == 'm' or o.flag == 'v')]
+        codes = {
+            "easymodo": ["easymodo"]
+        }
+    else:
+        flagobjects = [o for o in objects if hasattr(o, "flag")
+                    and hasattr(o, "flag_description")]
+
     flagobjects = sorted(flagobjects, key=lambda o: o.flag)
     for o in objects:
         if hasattr(o, "flag") and not hasattr(o, "flag_description"):
@@ -283,6 +295,18 @@ def run_interface(objects, custom_degree=False, snes=False, codes=None):
             o.class_reseed('full_randomize')
             o.full_randomize()
         o.randomize_step_finished = True
+
+    # TODO: temporary until implemantation for all supported roms
+    if "ROTDS" in get_global_label():
+        # create documentation folder
+        folder = "docs_{0}".format(get_seed())
+        if not path.isdir(folder):
+            mkdir(folder)
+
+        # print all printable objects
+        for o in objects:
+            if hasattr(o, "printable"):
+                o.print_all(path.join(folder, o.printable + ".txt"))
 
     if set(flags) >= set(allflags):
         flags = allflags

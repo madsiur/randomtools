@@ -6,6 +6,7 @@ from hashlib import md5
 import string
 from copy import copy
 from collections import Counter
+from pprint import pprint
 
 
 try:
@@ -29,6 +30,7 @@ CMP_PATCH_FILENAMES = []
 RANDOM_DEGREE = 0.25
 SEED = None
 OPEN_FILES = {}
+DEFINITIONS = {}
 
 
 def get_open_file(filename):
@@ -69,6 +71,15 @@ def get_seed():
 def set_seed(seed):
     global SEED
     SEED = seed
+
+def add_definition(key, value):
+    global DEFINITIONS
+    DEFINITIONS[key] = value
+
+def get_definition(key):
+    global DEFINITIONS
+    return DEFINITIONS.get(key)
+
 
 
 def determine_global_table(outfile):
@@ -410,6 +421,7 @@ class TableSpecs:
                  grouped=False, pointed=False, delimit=False,
                  pointerfilename=None):
         self.attributes = []
+        self.exclusions = []
         self.bitnames = {}
         self.total_size = 0
         self.pointer = pointer
@@ -574,6 +586,10 @@ class TableObject(object):
     @classproperty
     def total_size(cls):
         return cls.specs.total_size
+
+    @classproperty
+    def exclusions(cls):
+        return cls.specs.exclusions
 
     @classproperty
     def every(cls):
@@ -1109,6 +1125,10 @@ class TableObject(object):
                         and cls2.randomize_step_finished):
                     raise Exception("Randomize order violated: %s %s"
                                     % (cls, cls2))
+        
+        # defining attributes that couldn't be defined at start due to global_label not set
+        cls.define_attributes_all()
+
         cls.class_reseed("group")
         cls.groupshuffle()
         cls.class_reseed("inter")
@@ -1120,6 +1140,13 @@ class TableObject(object):
         cls.randomize_all()
         cls.mutate_all()
         cls.randomized = True
+
+    @classmethod
+    def define_attributes_all(cls):
+        for o in cls.every:
+            if hasattr(o, "define_attributes"):
+                o.define_attributes()
+
 
     @classmethod
     def mutate_all(cls):
@@ -1151,6 +1178,15 @@ class TableObject(object):
             o.reseed(salt="shu")
             o.shuffle()
             o.shuffled = True
+
+    @classmethod
+    def print_all(cls, textpath):
+        s = ""
+        for o in cls.every:
+            s += o.print() + "\n"
+        f = open(textpath, "w")
+        f.write(s)
+        f.close()
 
     def mutate(self):
         if not hasattr(self, "mutate_attributes"):
@@ -1571,6 +1607,16 @@ def set_table_specs(filename=None):
             value = int(value.strip(), 0x10)
             setattr(addresses, attr, value)
             continue
+        
+        # table specs attribute line
+        if line[0] == '!':
+            set_table_extras(line)
+            continue
+        
+        # definition line
+        if line[0] == '@':
+            set_definitions(line)
+            continue
 
         if any(line.startswith(s) for s in [".patch", ".option"]):
             _, patchfilename = line.strip().split(' ', 1)
@@ -1649,3 +1695,83 @@ def set_table_specs(filename=None):
             TABLE_SPECS[objname].delimitval = delimitval
         if syncpointers:
             TABLE_SPECS[objname].syncpointers = pointers
+
+def set_table_extras(line_a):
+    # remove consecutive whitespace and separate attributes
+    while "  " in line_a:
+        line_a = line_a.replace("  ", " ")
+    line_a = line_a.split()
+
+    # if there is only two attributes
+    if len(line_a) == 2:
+        # assign each attribute to a variable
+        attribute, attributes_file = tuple(line_a)
+        #strip the ! from the variable
+        attribute = attribute.lstrip('!').strip()
+        # create attributes file path
+        attributes_file = path.join(tblpath, attributes_file)
+
+        for line_b in open(attributes_file):
+            line_b = line_b.strip()
+            # if line is not empty or not a comment, skip
+            if not line_b or line_b[0] == '#':
+                continue
+
+            # remove consecutive whitespace and separate attributes
+            while "  " in line_b:
+                line_b = line_b.replace("  ", " ")
+            line_b = line_b.split()
+
+            # if there is only two attributes
+            # e.g. "MonsterObject" and "monster_exclusions.txt"
+            if len(line_b) == 2:
+                # assign each attribute to a variable
+                objname, object_attribute_file = tuple(line_b)
+                # if the object has an instance in TABLE_SPECS and has the attribute we want to add to
+                if objname in TABLE_SPECS and hasattr(TABLE_SPECS[objname], attribute):
+                    # get the empty attribute
+                    attribute_var = getattr(TABLE_SPECS[objname], attribute, None)
+                    # create object attribute file path
+                    object_attribute_file = path.join(tblpath, object_attribute_file)
+
+                    for line_c in open(object_attribute_file):
+                        line_c = line_c.strip()
+                        # if line is not empty or not a comment, skip
+                        if not line_c or line_c[0] == '#':
+                            continue
+
+                        try:
+                            # for now we just handle lists with IDs in them
+                            if isinstance(attribute_var, list):
+                                line_c = int(line_c)
+                                attribute_var.append(line_c)
+                        except ValueError:
+                            continue
+                    # set the newly filled attribute
+                    setattr(TABLE_SPECS[objname], attribute, attribute_var)
+
+def set_definitions(line_a):
+    # remove consecutive whitespace and separate attributes
+    while "  " in line_a:
+        line_a = line_a.replace("  ", " ")
+    line_a = line_a.split()
+
+    # if there is only two attributes
+    if len(line_a) == 2:
+        # assign each attribute to a variable
+        key, definition_file = tuple(line_a)
+        #strip the @ from the key
+        key = key.lstrip('@').strip()
+        # create attributes file path
+        definition_file = path.join(tblpath, definition_file)
+
+        definition = []
+        # add each definition file entry to a definition
+        for line_b in open(definition_file):
+            line_b = line_b.strip()
+            # if line is not empty or not a comment, skip
+            if not line_b or line_b[0] == '#':
+                continue
+            
+            definition.append(line_b)
+        add_definition(key, definition)
